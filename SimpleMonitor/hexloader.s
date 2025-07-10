@@ -26,7 +26,8 @@ MAX_RETRIES		equ 100
 TIMEOUT_CYCLES	equ 20000
 TIMEOUT_RETRIES	equ 128
 BLOCK_SIZE		equ 128
-
+;;ACIA_INIT		equ %00010101				; Ints disabled, TX int disable, /16 clock, 8N1 - 115200 baud
+ACIA_INIT		equ %00010110				; Ints disabled, TX int disable, /64 clock, 8N1 - 28800 baud
 
 workspace:		equ 0xfe00
 checksum:		equ 0 					; checksum byte									; 0xff00
@@ -38,21 +39,40 @@ xmodem_retries: equ xmodem_csum+2														; 0xff0a
 xmodem_acks:	equ xmodem_retries+2													; 0xff0c
 xmodem_naks:	equ xmodem_acks+2														; 0xff0e
 xmodem_lastblk:	equ xmodem_naks+2														; 0xff10
-xmodem_errors:	equ xmodem_lastblk+2													; 0xff12
-config:			equ	xmodem_errors+2														; 0xff14
-buffer:			equ config+2															; 0xff16
+xmodem_thisblk:	equ	xmodem_lastblk+1													; 0xff11
+xmodem_blkcomp:	equ	xmodem_thisblk+1													; 0xff12
+xmodem_errors:	equ xmodem_blkcomp+1													; 0xff13
+acia_config:	equ	xmodem_errors+2
+config:			equ	acia_config+2														; 0xff15
+serial_status:	equ config+2															; 0xff17
+write_index:	equ serial_status+2
+read_index:		equ write_index+1
+buffer:			equ read_index+1														; 0xff19
 stack_end:		equ 0x100
 
 
-		;org 0x0000
-		org 0xc000
+		org 0x0000
+		;org 0xc000
 
+; At 0x0000
 start:
 		ld	sp,workspace+stack_end
 		call acia_reset
+		call start_next
+start_next:
+		pop hl
+		ld de,start-start_next
+		add hl,de
+		jr boot_continue
+		ds 0x38-$,0xc9
+; At 0x0038
+		jp acia_interrupt
+boot_continue:
+		push hl
 		call print_str
 		db "\r\n******************************************"
 		db "\r\n* Bootstrap loader for Z80, v0.91        *"
+		db "\r\n* Load address 0x%x                    *"
 		db "\r\n******************************************\r\n\r\n",0
 		ld hl,0					; Copy ROM to RAM. Write to ROM space will write to RAM.
 		ld de,hl
@@ -60,13 +80,14 @@ start:
 		ldir
 		ld iy,workspace
 		ld (iy+config),hl
+		ld (iy+acia_config),ACIA_INIT
 main_loop:
 		ld hl,stack_end
 		ld bc,iy
 		add hl,bc
 		ld sp,hl
 		call print_str
-		db "Enter command (m=mem,g=go,:=load,i=in port,o=out port,r=read,w=write,f=fill,x=xmodem,e=echo,b=toggle speed): ", 0
+		db "Enter command (m=mem,g=go,:=load,i=in port,o=out port,r=read,w=write,f=fill,x=xmodem,e=echo,b=toggle speed,p=page RAM): ", 0
 		call read_line
 		ld hl, iy
 		ld bc,buffer
@@ -95,7 +116,7 @@ check_next:
 		cp 'i'
 		jr z,in_port
 		cp 'o'
-		jr z,out_port
+		jp z,out_port
 		cp 'r'
 		jp z,read_mem
 		cp 'w'
@@ -106,13 +127,21 @@ check_next:
 		jp z,fill_mem
 		cp 'b'
 		jp z,set_baud_rate
+		cp 'p'
+		jp z,page_ram
+		cp 'i'
+		jp z,toggle_interrupt_receive
 		jp main_loop
 parse_intel_srec:
 		call parse_record
 		jp	main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 memory_viewer:
 		call memory_viewer_line
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 execute:
 		call get_hex_word
 		jp c, syntax_error
@@ -123,6 +152,8 @@ execute:
 		pop hl
 		call (hl)
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 in_port:
 		call get_hex_word
 		jp c,syntax_error
@@ -133,6 +164,8 @@ in_port:
 		call print_str
 		db "Port 0x%x: 0x%c\r\n", 0
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 out_port:
 		call get_hex_word
 		jp c,syntax_error
@@ -148,6 +181,8 @@ syntax_error_pop_2:
 syntax_error_pop:
 		pop bc
 		jp syntax_error
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 read_mem:
 		call get_hex_word
 		jp c,syntax_error
@@ -157,6 +192,8 @@ read_mem:
 		call print_str
 		db "0x%x : 0x%c\r\n",0
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 write_mem:
 		call get_hex_word
 		jp c,syntax_error
@@ -166,6 +203,8 @@ write_mem:
 		pop hl
 		ld (hl),e
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 fill_mem:
 		call get_hex_word
 		jp c,syntax_error
@@ -179,6 +218,7 @@ fill_mem:
 		pop hl
 ; cannot use LDIR, since memory may be R/O. This causes a problem when it
 ; hits RAM. We may want to zap the memory in the background.
+;;---------------------------------------------------------------------------------------
 fill_loop:
 		ld (hl),e
 		inc hl
@@ -187,6 +227,8 @@ fill_loop:
 		or c
 		jr nz,fill_loop
 		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
 set_baud_rate:
 		ld a,(iy+config)
 		xor 1
@@ -196,16 +238,93 @@ set_baud_rate:
 set_fast:
 		call print_str
 		db "Set baud rate to 115,200.\r\n",0
-		ld	a, %00010101	; Ints disabled, TX int disable, /16 clock, 8N1 - 115200 baud
+		ld a,(iy+acia_config)
+		and 0x80
+		or %00010101								; Ints disabled, TX int disable, /16 clock, 8N1 - 115200 baud
 		out	(acia_status),a
+		ld (iy+acia_config),a
 		ret
 		jp main_loop
 set_slow:
 		call print_str
 		db "Set baud rate to 28,800.\r\n",0
-		ld	a, %00010110	; Ints disabled, TX int disable, /64 clock, 8N1 - 28800 baud
+		ld a,(iy+acia_config)
+		and 0x80
+		or %00010110								; Ints disabled, TX int disable, /64 clock, 8N1 - 28800 baud
 		out	(acia_status),a
-		ret
+		ld (iy+acia_config),a
+		jp main_loop
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
+page_ram:
+		ld a,7
+		out (0xb1),a
+		ld a,%01000000
+		out (0xb0),a
+		ld a,0x0e
+		out (0xb1),a
+		in a,(0xb1)
+		xor 1
+		out (0xb0),a
+		bit 0,a
+		jr z,rom_disabled
+		call print_str
+		db "ROM enabled.\r\n",0
+		jp main_loop
+rom_disabled:
+		ld hl,0
+		ld a,(hl)
+		xor 0xff
+		ld (hl),a
+		ld b,(hl)
+		cp b
+		jr nz,ram_switch_failed
+		call print_str
+		db "RAM enabled.\r\n",0
+		jp main_loop
+ram_switch_failed:
+		call print_str
+		db "RAM write test failed.\r\n",0
+		jp main_loop
+
+toggle_interrupt_receive:
+;;---------------------------------------------------------------------------------------
+;;---------------------------------------------------------------------------------------
+		ld a,(iy+config)
+		xor 2
+		ld (iy+config),a
+		bit 1,a
+		jr z,interrupt_disable
+		ex af,af'
+		exx
+		ld hl,iy
+		ld de,buffer
+		add hl,de
+		ld c,0
+		ld (iy+read_index),0
+		ld b,0
+		add hl,buffer
+		ex af,af'
+		exx
+		ld a,(iy+acia_config)
+		or a,0x80
+		ld (iy+acia_config),a
+		out (acia_status),a
+		im 2
+		call print_str
+		db "RX Interrupt enabled.\r\n",0
+		ei
+		jp main_loop
+
+interrupt_disable:
+		di
+		ld a,(iy+acia_config)
+		and a,0x7f
+		ld (iy+acia_config),a
+		out (acia_status),a
+		call print_str
+		db "RX Interrupt disabled.\r\n",0
+		jp main_loop
 
 ; ----------------------------
 ; Read one line into buffer
@@ -717,18 +836,10 @@ xmodem_read_block:
 xmodem_retry_block:
 		call acia_getc_timeout			; block #						; 66
 		jp c,xmodem_retry_data											; 10
-		ld b,a															; 4
+		ld (iy+xmodem_thisblk),a										; 19(!)
 		call acia_getc_timeout			; block # complement			; 66
 		jp c, xmodem_retry_data											; 10
-		ld c,a															; 4
-		xor b															; 4
-		cp 0xff
-		jp nz, xmodem_invalid_complement
-		ld a,(iy+xmodem_lastblk)			; This is the received block # from last time
-		inc a
-		cp b
-		jp nz,xmodem_sequence_jumped
-		ld (iy+xmodem_lastblk),b
+		ld (iy+xmodem_blkcomp),a
 		ld d, BLOCK_SIZE
 		ld e, 0							; checksum
 		ld hl,(iy+xmodem_current)
@@ -745,13 +856,26 @@ xmodem_read_data_loop:
 		ld e,a
 		dec d
 		jr nz, xmodem_read_data_loop
+		; All validation is done when the entire block has been received.
 		call acia_getc_timeout		; checksum byte
 		jp c, xmodem_checksum_timeout
+		; Do checksum validation
 		ld b,a						; Expected checksum
 		ld c,e						; Calculated checksum
 		cp e
 		ld (iy+xmodem_csum),bc
 		jp nz, xmodem_checksum_error
+		; Do block number validation
+		ld a,(iy+xmodem_thisblk)
+		xor (iy+xmodem_blkcomp)
+		cp 0xff
+		jp nz,xmodem_invalid_complement
+		; Do expected block number check
+		ld a,(iy+xmodem_lastblk)			; This is the received block # from last time
+		inc a
+		cp (iy+xmodem_thisblk)
+		jp nz,xmodem_sequence_jumped
+		ld (iy+xmodem_lastblk),a
 		ld (iy+xmodem_current),hl
 		call send_ack
 		ld bc,(iy+xmodem_acks)
@@ -784,8 +908,8 @@ xmodem_invalid_complement:
 		ld de,(iy+xmodem_errors)
 		inc de
 		ld (iy+xmodem_errors),de
-		ld a,c
-		xor a
+		ld a,b
+		cpl
 		push af
 		ld a,c
 		push af
@@ -833,9 +957,6 @@ retry_next:
 		jp xmodem_retry_block
 xmodem_end_receive:
 		call send_ack
-		ld de,(iy+xmodem_acks)
-		inc de
-		ld (iy+xmodem_acks),de
 xmodem_done:
 		ld de,(iy+xmodem_start)
 		ld hl,(iy+xmodem_current)
@@ -856,26 +977,21 @@ xmodem_done:
 console_echo:
 		call print_str
 		db "Console Echo mode. CTRL-C quits.\r\n",0
+		ld de,0
 echo_loop:
-		call acia_getc
-		call acia_putc
-		cp 0x0d
-		jr z,echo_lf
-		cp 3
-		jr nz,echo_loop
+		call acia_getc				; 52 cycles
+		call acia_putc				; 74 cycles
+		inc de
+		cp 3						; 8
+		jr nz,echo_loop				; 12/7
 		push de
 		call print_str
 		db "\r\nEcho received %d bytes\r\n.",0
 		jp main_loop
-echo_lf:
-		ld a,0x0a
-		call acia_putc
-		jr echo_loop
 acia_reset:
 		ld a, %00000011	; Master reset
 		out	(acia_status),a
-		ld	a, %00010101	; Ints disabled, TX int disable, /16 clock, 8N1 - 115200 baud
-		ld	a, %00010110	; Ints disabled, TX int disable, /64 clock, 8N1 - 28800 baud
+		ld	a, ACIA_INIT
 		out	(acia_status),a
 		ret
 
@@ -883,17 +999,43 @@ acia_reset:
 ; Read character from 6850
 ; ----------------------------
 acia_getc:
+		;bit 0,(iy+config)
+		;jr nz,interrupt_getc
 		in a, (acia_status)			; 11
 		bit rdrf_bit,a   			; 8
 		jr z,acia_getc				; 12/7
 		in a, (acia_data)			; 11
 		ret							; 10
 									; 52 cycles
+interrupt_getc:
+		ret
+acia_interrupt:
+		exx
+		ex af,af'
+		in a,(acia_status)
+		bit 0,a
+		jr z,interrupt_done
+		add hl,bc
+		ld (hl),a
+		sub hl,bc
+		ld a,c
+		inc a
+		and 0x7f
+		cp e
+		jr z,interrupt_done
+		ld c,a
+interrupt_done:
+		ex af,af'
+		exx
+		ei
+		reti
+
 ; ----------------------------
 ; Read character from 6850, with timeout
 ; Output A - character
 ; ----------------------------
 acia_getc_timeout:
+		bit 0,(iy+config)
 		push bc						; 11
 		ld bc, TIMEOUT_CYCLES		; 10
 getch_wait_loop:
