@@ -16,6 +16,9 @@ psg_wr_addr:	equ	%10111111		; 0xbf
 psg_rd_data:	equ	%10111111		; 0xbf
 psg_wr_data:	equ	%10111110		; 0xbe
 
+disp_config:	equ %11011110		; 0xde
+disp_data:		equ %11011111		; 0xdf
+
 SOH				equ 01h
 ETX				equ 03h
 EOT				equ 04h
@@ -71,7 +74,7 @@ boot_continue:
 		push hl
 		call print_str
 		db "\r\n******************************************"
-		db "\r\n* Bootstrap loader for Z80, v0.91        *"
+		db "\r\n* Bootstrap loader for Z80, v0.93        *"
 		db "\r\n* Load address 0x%x                    *"
 		db "\r\n******************************************\r\n\r\n",0
 		ld hl,0					; Copy ROM to RAM. Write to ROM space will write to RAM.
@@ -81,6 +84,9 @@ boot_continue:
 		ld iy,workspace
 		ld (iy+config),hl
 		ld (iy+acia_config),ACIA_INIT
+		call init_display
+		call disp_str
+		db "Simple Z80 v0.93",0
 main_loop:
 		ld hl,stack_end
 		ld bc,iy
@@ -129,8 +135,8 @@ check_next:
 		jp z,set_baud_rate
 		cp 'p'
 		jp z,page_ram
-		cp 'i'
-		jp z,toggle_interrupt_receive
+		;cp 'i'
+		;jp z,toggle_interrupt_receive
 		jp main_loop
 parse_intel_srec:
 		call parse_record
@@ -1071,3 +1077,61 @@ acia_putc_wait:
 		ret							; 10
 									; 74 cycles
 
+; ----------------------------
+; ----------------------------
+DISP_RESET:		equ		%00110000	; Function reset
+DISP_SETMODE:	equ		%00111000	; Set 8 bit, 2 line display, 5x7 font
+DISP_CLEAR:		equ		%00000001		
+DISP_OFF:		equ		%00001000
+DISP_ENTRYMODE: equ		%00000110
+DISP_ON:		equ		%00001100
+DISP_ON_CURSOR: equ		%00001110
+
+init_display:
+		ld bc,disp_config
+		ld a,DISP_RESET
+		call write_display_delay
+		call write_display_delay
+		call write_display_delay
+		ld a,DISP_SETMODE
+		call write_display_delay
+		ld a,DISP_CLEAR
+		call write_display_delay
+		ld a,DISP_ENTRYMODE
+		call write_display_delay
+		ld a,DISP_ON_CURSOR
+		call write_display_delay
+		ret
+; ----------------------------
+; ----------------------------
+disp_str:
+		pop ix						; Get format string address
+		push af						; save AF for now. We want to be non-destructive.
+		push bc
+		ld bc,disp_data
+disp_str_next:
+		in a,(disp_config)
+		add a,a
+		jr c,disp_str_next
+		ld a, (ix)
+		inc ix
+		and a
+		jr z,disp_str_done
+		out (c),a
+		jr disp_str_next
+disp_str_done:
+		pop bc
+		pop af
+		jp (ix)
+
+; ----------------------------
+; 4092 clock cycles = ~2.2mS at 1.86mHz
+; ----------------------------
+write_display_delay:
+		out (c),a
+short_delay:
+		ld d,0
+sdloop:
+		dec d
+		jr nz,sdloop
+		ret
