@@ -1,5 +1,7 @@
+	OUTPUT bootloader.bin
 ;
 ; Assemble with  z80asm -b hexloader.s
+; or sjasmplus hexloader.s
 ; connect via linux picocom --send-cmd "ascii-xfr -s -l 100 -c 10" /dev/ttyUSB0 -b 28800
 ; convert srec_cat hexloader.bin -Binary -offset 49152 -output hexloader.hex -Intel
 ; Test Records
@@ -44,18 +46,24 @@ xmodem_naks:	equ xmodem_acks+2														; 0xff0e
 xmodem_lastblk:	equ xmodem_naks+2														; 0xff10
 xmodem_thisblk:	equ	xmodem_lastblk+1													; 0xff11
 xmodem_blkcomp:	equ	xmodem_thisblk+1													; 0xff12
-xmodem_errors:	equ xmodem_blkcomp+1													; 0xff13
-acia_config:	equ	xmodem_errors+2
-config:			equ	acia_config+2														; 0xff15
-serial_status:	equ config+2															; 0xff17
-write_index:	equ serial_status+2
-read_index:		equ write_index+1
-buffer:			equ read_index+1														; 0xff19
+xmodem_remaining equ xmodem_blkcomp+1   ; 16-bit bytes remaining						; 0xff13
+xmodem_count    equ xmodem_remaining+2  ; 8-bit actual bytes in this block				; 0xff14
+xmodem_csum_byte equ xmodem_count+1  ; 8-bit checksum									; 0xff16
+xmodem_tx_index equ xmodem_csum_byte+1  ; 8-bit data byte index							; 0xff17
+xmodem_tx_byte	equ xmodem_tx_index+1     ; temporary byte								; 0xff18
+xmodem_errors:	equ xmodem_tx_byte+1													; 0xff19
+acia_config:	equ	xmodem_errors+2														; 0xff1b
+config:			equ	acia_config+2														; 0xff1d
+serial_status:	equ config+2															; 0xff1f
+write_index:	equ serial_status+2														; 0xff21
+read_index:		equ write_index+1														; 0xff23
+buffer:			equ read_index+1														; 0xff24
 stack_end:		equ 0x100
 
 
 		org 0x0000
 		;org 0xc000
+
 
 ; At 0x0000
 start:
@@ -76,6 +84,7 @@ boot_continue:
 		db "\r\n******************************************"
 		db "\r\n* Bootstrap loader for Z80, v0.93        *"
 		db "\r\n* Load address 0x%x                    *"
+		db "\r\n* Built on ",__DATE__," at ", __TIME__
 		db "\r\n******************************************\r\n\r\n",0
 		ld hl,0					; Copy ROM to RAM. Write to ROM space will write to RAM.
 		ld de,hl
@@ -84,16 +93,17 @@ boot_continue:
 		ld iy,workspace
 		ld (iy+config),hl
 		ld (iy+acia_config),ACIA_INIT
-		call init_display
-		call disp_str
-		db "Simple Z80 v0.93",0
+		;;call init_display
+		;;call disp_str
+		;;db "Simple Z80 v0.93",0
 main_loop:
 		ld hl,stack_end
 		ld bc,iy
 		add hl,bc
 		ld sp,hl
 		call print_str
-		db "Enter command (m=mem,g=go,:=load,i=in port,o=out port,r=read,w=write,f=fill,x=xmodem,e=echo,b=toggle speed,p=page RAM): ", 0
+		db "m=mem,g=go,:=load,i=in port,o=out port,r=read,w=write,f=fill,xr/xs=xmodem,e=echo,s=toggle speed,p=page RAM,b=BBC basic\r\n"
+		db "Enter command: ", 0
 		call read_line
 		ld hl, iy
 		ld bc,buffer
@@ -105,18 +115,18 @@ check_next:
 		jp z,main_loop
 		cp ' '
 		jr z,check_next
-		cp '\t'
+		cp 9				; Tab
 		jr z,check_next
-		cp '\r'
+		cp 13				; CR
 		jr z,check_next
-		cp '\n'
+		cp 10				; LF
 		jr z,check_next
 		cp 'm'
 		jp z,memory_viewer
 		cp ':'
 		jp z,parse_intel_srec
 		cp 'x'
-		jp z,xmodem_receive
+		jp z,xmodem_send_receive
 		cp 'g'
 		jr z,execute
 		cp 'i'
@@ -131,12 +141,14 @@ check_next:
 		jp z,console_echo
 		cp 'f'
 		jp z,fill_mem
-		cp 'b'
+		cp 's'
 		jp z,set_baud_rate
 		cp 'p'
 		jp z,page_ram
 		;cp 'i'
 		;jp z,toggle_interrupt_receive
+		cp 'b'
+		jp z,bbcbasic
 		jp main_loop
 parse_intel_srec:
 		call parse_record
@@ -151,13 +163,13 @@ memory_viewer:
 execute:
 		call get_hex_word
 		jp c, syntax_error
+		ld hl,main_loop		; Set up code return address.
+		push hl
 		push de
 		push de				; parameter passing
 		call print_str
 		db "\r\nRunning from address 0x%x...\r\n", 0
-		pop hl
-		call (hl)
-		jp main_loop
+		ret					; Address is already on the stack. So we just return to it.
 ;;---------------------------------------------------------------------------------------
 ;;---------------------------------------------------------------------------------------
 in_port:
@@ -273,7 +285,7 @@ page_ram:
 		xor 1
 		out (0xb0),a
 		bit 0,a
-		jr z,rom_disabled
+		jr nz,rom_disabled
 		call print_str
 		db "ROM enabled.\r\n",0
 		jp main_loop
@@ -309,7 +321,6 @@ toggle_interrupt_receive:
 		ld c,0
 		ld (iy+read_index),0
 		ld b,0
-		add hl,buffer
 		ex af,af'
 		exx
 		ld a,(iy+acia_config)
@@ -476,7 +487,7 @@ dumpnextchar:
 		ld a,(hl)
 		bit 7,a
 		jr nz,dumpbadchar
-		cmp ' '
+		cp ' '
 		jr c,dumpbadchar
 		call acia_putc
 dumpcont:
@@ -789,11 +800,30 @@ send_nak:
 		ld a, NAK
 		jp acia_putc
 
+xmodem_send_receive:
+		ld a,(hl)
+		inc hl
+		cp 'r'						; 'xr' xmodem receive
+		jr z,xmodem_receive
+		cp 's'						; 'xs' xmodem send
+		jp nz, syntax_error
+		call get_hex_word			; get address
+		jp c,syntax_error
+		push de
+		call get_hex_word			; get length
+		ld bc,de
+		pop de
+		jp c,syntax_error
+		; Address in DE, length in BC
+		jp xmodem_send
 ; ----------------------------
 ; Main XMODEM Receive
 xmodem_receive:
 		call get_hex_word
 		jp c,syntax_error
+		call begin_xmodem
+		jp main_loop
+begin_xmodem:
 		ld (iy+xmodem_start),de
 		ld (iy+xmodem_current),de
 		push de
@@ -979,7 +1009,285 @@ xmodem_done:
 		push de
 		call print_str
 		db "%d ACKs, %d NAKs, %d errors.\r\n",0
-		jp	main_loop
+		ret
+
+; ----------------------------
+; Main XMODEM Send
+;
+; Entry:
+;   DE = source address
+;   BC = number of bytes to send
+;
+xmodem_send:
+        ld (iy+xmodem_start),de
+        ld (iy+xmodem_current),de
+        ld (iy+xmodem_remaining),bc
+
+        ld de,0
+        ld (iy+xmodem_errors),de
+        ld (iy+xmodem_acks),de
+        ld (iy+xmodem_naks),de
+
+        xor a
+        ld (iy+xmodem_lastblk),a
+
+        push bc
+        push de
+        call print_str
+        db "Begin xmodem send from 0x%x, size 0x%x bytes...\r\n",0
+
+        call print_str
+        db "CTRL-D cancels\r\n",0
+
+; ----------------------------
+; Wait for receiver to request transfer
+; XMODEM checksum receivers normally send NAK.
+
+xmodem_send_wait:
+        ld b,TIMEOUT_RETRIES
+
+xmodem_send_wait_loop:
+        call acia_getc_timeout
+        jp c,xmodem_send_wait_timeout
+
+        cp NAK
+        jp z,xmodem_send_next_block
+
+        cp CAN
+        jp z,xmodem_send_cancelled
+
+        ; Ignore other characters while waiting.
+        jr xmodem_send_wait_loop
+
+xmodem_send_wait_timeout:
+        djnz xmodem_send_wait_loop
+
+        call print_str
+        db "\r\nXMODEM send timed out waiting for NAK.\r\n",0
+        ret
+
+; ----------------------------
+; Determine whether another block is needed.
+
+xmodem_send_next_block:
+        ld bc,(iy+xmodem_remaining)
+        ld a,b
+        or c
+        jp z,xmodem_send_eot
+
+        ; Number of real bytes in this block:
+        ; min(remaining, 128).
+        ld a,b
+        or a
+        jr nz,xmodem_send_full_block
+
+        ld a,c
+        cp BLOCK_SIZE
+        jr nc,xmodem_send_full_block
+
+        ld (iy+xmodem_count),a
+        jr xmodem_send_prepare
+
+xmodem_send_full_block:
+        ld a,BLOCK_SIZE
+        ld (iy+xmodem_count),a
+
+xmodem_send_prepare:
+        ld a,(iy+xmodem_lastblk)
+        inc a
+        ld (iy+xmodem_thisblk),a
+
+        ld a,(iy+xmodem_thisblk)
+        cpl
+        ld (iy+xmodem_blkcomp),a
+
+        ld a,MAX_RETRIES
+        ld (iy+xmodem_retries),a
+
+; ----------------------------
+; Transmit one complete block.
+; On retry, resend the same block without advancing source.
+
+xmodem_send_retry_block:
+        ld a,SOH
+        call acia_putc
+
+        ld a,(iy+xmodem_thisblk)
+        call acia_putc
+
+        ld a,(iy+xmodem_blkcomp)
+        call acia_putc
+
+        xor a
+        ld (iy+xmodem_csum_byte),a
+        ld (iy+xmodem_tx_index),a
+
+xmodem_send_data_loop:
+        ld a,(iy+xmodem_tx_index)
+        ld c,a
+
+        ld a,(iy+xmodem_count)
+        cp c
+        jr z,xmodem_send_padding
+
+        ; Send a real source byte.
+        ld hl,(iy+xmodem_current)
+        ld b,0
+        add hl,bc
+        ld a,(hl)
+        jr xmodem_send_data_byte
+
+xmodem_send_padding:
+        ; XMODEM convention: pad final block with Ctrl-Z.
+        ld a,0x1a
+
+xmodem_send_data_byte:
+        ld (iy+xmodem_tx_byte),a
+        call acia_putc
+
+        ld a,(iy+xmodem_csum_byte)
+        ld c,a
+        ld a,(iy+xmodem_tx_byte)
+        add a,c
+        ld (iy+xmodem_csum_byte),a
+
+        ld a,(iy+xmodem_tx_index)
+        inc a
+        ld (iy+xmodem_tx_index),a
+        cp BLOCK_SIZE
+        jr nz,xmodem_send_data_loop
+
+        ; Send the 8-bit checksum.
+        ld a,(iy+xmodem_csum_byte)
+        call acia_putc
+
+; ----------------------------
+; Wait for receiver response.
+
+        call acia_getc_timeout
+        jp c,xmodem_send_retry
+
+        cp ACK
+        jp z,xmodem_send_block_acked
+
+        cp NAK
+        jr z,xmodem_send_retry
+
+        cp CAN
+        jp z,xmodem_send_cancelled
+
+        ; Unexpected response: retry this block.
+        jr xmodem_send_retry
+
+xmodem_send_retry:
+        ld de,(iy+xmodem_errors)
+        inc de
+        ld (iy+xmodem_errors),de
+
+        ld a,(iy+xmodem_retries)
+        dec a
+        ld (iy+xmodem_retries),a
+        jp z,xmodem_send_give_up
+
+        ld de,(iy+xmodem_naks)
+        inc de
+        ld (iy+xmodem_naks),de
+
+        jp xmodem_send_retry_block
+
+; ----------------------------
+; Advance source and remaining length only after ACK.
+
+xmodem_send_block_acked:
+        ld a,(iy+xmodem_thisblk)
+        ld (iy+xmodem_lastblk),a
+
+        ld a,(iy+xmodem_count)
+        ld c,a
+        ld b,0
+
+        ld hl,(iy+xmodem_current)
+        add hl,bc
+        ld (iy+xmodem_current),hl
+
+        ld hl,(iy+xmodem_remaining)
+        or a
+        sbc hl,bc
+        ld (iy+xmodem_remaining),hl
+
+        ld de,(iy+xmodem_acks)
+        inc de
+        ld (iy+xmodem_acks),de
+
+        jp xmodem_send_next_block
+
+; ----------------------------
+; Send EOT and wait for final ACK.
+
+xmodem_send_eot:
+        ld a,MAX_RETRIES
+        ld (iy+xmodem_retries),a
+
+xmodem_send_eot_retry:
+        ld a,EOT
+        call acia_putc
+
+        call acia_getc_timeout
+        jp c,xmodem_send_eot_failed
+
+        cp ACK
+        jp z,xmodem_send_done
+
+        cp CAN
+        jp z,xmodem_send_cancelled
+
+xmodem_send_eot_failed:
+        ld a,(iy+xmodem_retries)
+        dec a
+        ld (iy+xmodem_retries),a
+        jr nz,xmodem_send_eot_retry
+
+        call print_str
+        db "\r\nXMODEM send failed waiting for final ACK.\r\n",0
+        ret
+
+; ----------------------------
+; Error exits.
+
+xmodem_send_give_up:
+        call print_str
+        db "\r\nToo many XMODEM block retries.\r\n",0
+        ret
+
+xmodem_send_cancelled:
+        call print_str
+        db "\r\nXMODEM send cancelled.\r\n",0
+        ret
+
+; ----------------------------
+; Successful completion.
+
+xmodem_send_done:
+        ld hl,(iy+xmodem_start)
+        ld de,(iy+xmodem_current)
+        or a
+        sbc hl,de
+        push hl
+
+        call print_str
+        db "\r\nXMODEM send completed. Sent 0x%x bytes.\r\n",0
+
+        ld de,(iy+xmodem_errors)
+        push de
+        ld de,(iy+xmodem_naks)
+        push de
+        ld de,(iy+xmodem_acks)
+        push de
+
+        call print_str
+        db "%d ACKs, %d retries, %d errors.\r\n",0
+        ret
+
 console_echo:
 		call print_str
 		db "Console Echo mode. CTRL-C quits.\r\n",0
@@ -1135,3 +1443,30 @@ sdloop:
 		dec d
 		jr nz,sdloop
 		ret
+
+
+RAM_START		EQU 	0x8000
+
+PORT_STM_FILE		EQU	0x01			; The IO port for the SD card filing system
+
+BUILD_ROM		EQU 	1			; Set to 1 to build for ROM, or 0 to build for RAM
+
+bbcbasic:
+			MODULE BUILD
+			ld hl,main_loop
+			push hl
+			CALL    TELL
+			DEFM	"Biscuit's Simple Z80 1.0\n\r"
+			DEFM	"\n\r"
+			DEFB    0
+
+			include "../BBC Basic/main.z80"
+			include "../BBC Basic/exec.z80"
+			include "../BBC Basic/eval.z80"
+			include "../BBC Basic/fpp.z80"
+			include "../BBC Basic/sorry.z80"
+			include "../BBC Basic/patch.z80"
+			include "../BBC Basic/ram.z80"
+
+@USER:  		ENDMODULE
+
