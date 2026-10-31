@@ -10162,6 +10162,16 @@
 	)
 	(wire
 		(pts
+			(xy 378.46 140.97) (xy 369.57 140.97)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "641270ea-3566-44fa-ab65-37b64a9e3d55")
+	)
+	(wire
+		(pts
 			(xy 187.96 66.04) (xy 218.44 66.04)
 		)
 		(stroke
@@ -14009,6 +14019,72 @@
 		)
 	)
 	(symbol
+		(lib_id "power:GND")
+		(at 378.46 140.97 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "0e1b5b3f-7d32-47e5-b907-164afdabf87e")
+		(property "Reference" "#PWR025"
+			(at 378.46 147.32 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "GND"
+			(at 378.46 146.05 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 378.46 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 378.46 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 378.46 140.97 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "595cd158-1431-4dd4-af11-ad798a8ed20a")
+		)
+		(instances
+			(project "z80sbc - Revision 3"
+				(path "/408a3723-2d96-4351-90c6-6b6500fcdbbe"
+					(reference "#PWR025")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:+5V")
 		(at 261.62 80.01 0)
 		(unit 1)
@@ -17487,43 +17563,43 @@
 			)
 		)
 		(pin "9"
-			(uuid "be34ffc5-86b8-4354-aa12-7748857d4b88")
+			(uuid "be34ffc5-86b8-4354-aa12-7748857d4b89")
 		)
 		(pin "1"
-			(uuid "33c18c1e-8128-4b75-ba4b-176ab5f303bc")
+			(uuid "33c18c1e-8128-4b75-ba4b-176ab5f303bd")
 		)
 		(pin "13"
-			(uuid "65c86bf3-87dd-4834-9ff0-997077c2bf18")
+			(uuid "65c86bf3-87dd-4834-9ff0-997077c2bf19")
 		)
 		(pin "7"
 			(uuid "2b2eea3a-969b-4816-8c72-2b80a524012c")
 		)
 		(pin "12"
-			(uuid "18a443ec-52fd-48d8-b23c-fc716138e25c")
+			(uuid "18a443ec-52fd-48d8-b23c-fc716138e25d")
 		)
 		(pin "2"
-			(uuid "b39acafa-464a-4346-a967-8d3c754c762a")
+			(uuid "b39acafa-464a-4346-a967-8d3c754c762b")
 		)
 		(pin "4"
-			(uuid "26b320b2-294d-4b31-9453-b6edb4c501f5")
+			(uuid "26b320b2-294d-4b31-9453-b6edb4c501f6")
 		)
 		(pin "10"
-			(uuid "7fe10f9b-930f-4948-bcc4-67e692412db6")
+			(uuid "7fe10f9b-930f-4948-bcc4-67e692412db7")
 		)
 		(pin "3"
-			(uuid "68c3a56c-10ad-457a-83f8-b797d7f9d2ad")
+			(uuid "68c3a56c-10ad-457a-83f8-b797d7f9d2ae")
 		)
 		(pin "11"
-			(uuid "3019c8da-6c32-4d4e-83b8-3a98024c7151")
+			(uuid "3019c8da-6c32-4d4e-83b8-3a98024c7152")
 		)
 		(pin "6"
-			(uuid "7a60eb7c-c566-4f2d-b52c-fcd4e0603cc3")
+			(uuid "7a60eb7c-c566-4f2d-b52c-fcd4e0603cc4")
 		)
 		(pin "8"
-			(uuid "c4b597b5-2fdc-41f0-b546-6ea749bff72e")
+			(uuid "c4b597b5-2fdc-41f0-b546-6ea749bff72f")
 		)
 		(pin "5"
-			(uuid "8057dcf8-09cf-4f2d-b5e8-94c86fe78f8e")
+			(uuid "8057dcf8-09cf-4f2d-b5e8-94c86fe78f8f")
 		)
 		(pin "14"
 			(uuid "5140e6ef-20cf-476e-b71e-18a0b941451c")
@@ -18849,72 +18925,6 @@
 				(path "/408a3723-2d96-4351-90c6-6b6500fcdbbe"
 					(reference "U7")
 					(unit 2)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:+5V")
-		(at 369.57 140.97 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "f8a79faa-c265-4498-affd-d81aebee9523")
-		(property "Reference" "#PWR025"
-			(at 369.57 144.78 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "+5V"
-			(at 369.57 135.89 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 369.57 140.97 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 369.57 140.97 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"+5V\""
-			(at 369.57 140.97 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "00ce474d-08d7-42d3-9ea6-90728c167007")
-		)
-		(instances
-			(project "z80sbc - Revision 3"
-				(path "/408a3723-2d96-4351-90c6-6b6500fcdbbe"
-					(reference "#PWR025")
-					(unit 1)
 				)
 			)
 		)
