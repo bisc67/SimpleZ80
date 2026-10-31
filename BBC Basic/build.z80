@@ -1,0 +1,40 @@
+;
+; Title:	BBC Basic for BSX - Main build file
+; Author:	Dean Belfield
+; Created:	16/05/2020
+; Last Updated:	08/10/2020
+;
+; Modinfo:
+;
+; 08/10/2020:	Minor mods to support UART
+
+ROM_START		EQU 	0x0000			
+RAM_START		EQU 	0x8000
+
+PORT_STM_FILE		EQU	0x01			; The IO port for the SD card filing system
+
+BUILD_ROM		EQU 	0			; Set to 1 to build for ROM, or 0 to build for RAM
+
+	OUTPUT bbcbasic.bin
+			MODULE BUILD
+
+			IF BUILD_ROM == 0
+			ORG RAM_START
+			ELSE
+			ORG ROM_START+0x4000
+			ENDIF
+
+			CALL    TELL
+			DEFM	"Biscuit's Simple Z80 1.0\n\r"
+			DEFM	"\n\r"
+			DEFB    0
+
+			include "main.z80"
+			include "exec.z80"
+			include "eval.z80"
+			include "fpp.z80"
+			include "sorry.z80"
+			include "patch.z80"
+			include "ram.z80"
+
+@USER:  		ENDMODULE
