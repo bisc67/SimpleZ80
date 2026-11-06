@@ -14,12 +14,9 @@ acia_data:		equ %01111111		; 0x7f
 tdre_bit:		equ 0x01
 rdrf_bit:		equ 0x00
 
-psg_wr_addr:	equ	%10111111		; 0xbf
-psg_rd_data:	equ	%10111111		; 0xbf
-psg_wr_data:	equ	%10111110		; 0xbe
-
-disp_config:	equ %11011110		; 0xde
-disp_data:		equ %11011111		; 0xdf
+psg_wr_addr:	equ	%10110001		; 0xb1
+psg_rd_data:	equ	%10110001		; 0xb1
+psg_wr_data:	equ	%10110000		; 0xb0
 
 SOH				equ 01h
 ETX				equ 03h
@@ -84,7 +81,7 @@ boot_continue:
 		db "\r\n******************************************"
 		db "\r\n* Bootstrap loader for Z80, v0.93        *"
 		db "\r\n* Load address 0x%x                    *"
-		db "\r\n* Built on ",__DATE__," at ", __TIME__
+		db "\r\n* Built on ",__DATE__," at ", __TIME__,"        *"
 		db "\r\n******************************************\r\n\r\n",0
 		ld hl,0					; Copy ROM to RAM. Write to ROM space will write to RAM.
 		ld de,hl
@@ -93,9 +90,9 @@ boot_continue:
 		ld iy,workspace
 		ld (iy+config),hl
 		ld (iy+acia_config),ACIA_INIT
-		;;call init_display
-		;;call disp_str
-		;;db "Simple Z80 v0.93",0
+		call init_display
+		call disp_str
+		db "Simple Z80 v0.93",0
 main_loop:
 		ld hl,stack_end
 		ld bc,iy
@@ -275,15 +272,11 @@ set_slow:
 ;;---------------------------------------------------------------------------------------
 ;;---------------------------------------------------------------------------------------
 page_ram:
-		ld a,7
-		out (0xb1),a
-		ld a,%01000000
-		out (0xb0),a
-		ld a,0x0e
-		out (0xb1),a
-		in a,(0xb1)
+		ld a,psg_reg_port_a
+		out (psg_wr_addr),a
+		in a,(psg_rd_data)
 		xor 1
-		out (0xb0),a
+		out (psg_wr_data),a
 		bit 0,a
 		jr nz,rom_disabled
 		call print_str
@@ -821,9 +814,9 @@ xmodem_send_receive:
 xmodem_receive:
 		call get_hex_word
 		jp c,syntax_error
-		call begin_xmodem
+		call begin_xmodem_receive
 		jp main_loop
-begin_xmodem:
+begin_xmodem_receive:
 		ld (iy+xmodem_start),de
 		ld (iy+xmodem_current),de
 		push de
@@ -1395,20 +1388,32 @@ DISP_ENTRYMODE: equ		%00000110
 DISP_ON:		equ		%00001100
 DISP_ON_CURSOR: equ		%00001110
 
+psg_reg_mixctl 	equ 7
+psg_reg_port_a	equ 14
+psg_reg_port_b 	equ 15
+
+PORT_A_RAMENA 		equ $01
+PORT_A_DISP_CTL_E 	equ $20
+PORT_A_DISP_CTL_RW 	equ $40
+PORT_A_DISP_CTL_RS 	equ $80
+
 init_display:
-		ld bc,disp_config
+		ld a,psg_reg_mixctl
+		out (psg_wr_addr),a
+		ld a,$C0
+		out (psg_wr_data),a
 		ld a,DISP_RESET
-		call write_display_delay
-		call write_display_delay
-		call write_display_delay
+		call write_disp_cmd
+		call write_disp_cmd
+		call write_disp_cmd
 		ld a,DISP_SETMODE
-		call write_display_delay
+		call write_disp_cmd
 		ld a,DISP_CLEAR
-		call write_display_delay
+		call write_disp_cmd
 		ld a,DISP_ENTRYMODE
-		call write_display_delay
+		call write_disp_cmd
 		ld a,DISP_ON_CURSOR
-		call write_display_delay
+		call write_disp_cmd
 		ret
 ; ----------------------------
 ; ----------------------------
@@ -1416,16 +1421,13 @@ disp_str:
 		pop ix						; Get format string address
 		push af						; save AF for now. We want to be non-destructive.
 		push bc
-		ld bc,disp_data
+
 disp_str_next:
-		in a,(disp_config)
-		add a,a
-		jr c,disp_str_next
 		ld a, (ix)
 		inc ix
 		and a
 		jr z,disp_str_done
-		out (c),a
+		call write_disp_data
 		jr disp_str_next
 disp_str_done:
 		pop bc
@@ -1435,15 +1437,41 @@ disp_str_done:
 ; ----------------------------
 ; 4092 clock cycles = ~2.2mS at 1.86mHz
 ; ----------------------------
-write_display_delay:
-		out (c),a
-short_delay:
-		ld d,0
-sdloop:
-		dec d
-		jr nz,sdloop
-		ret
 
+write_disp_cmd:
+  		push af
+  		ld a,psg_reg_port_b
+  		out (psg_wr_addr),a
+  		pop af
+  		out (psg_wr_data),a
+  		ld a,psg_reg_port_a
+  		out (psg_wr_addr),a
+  		ld a,PORT_A_RAMENA
+  		out (psg_wr_data),a
+  		ld a,PORT_A_DISP_CTL_E|PORT_A_RAMENA
+  		out (psg_wr_data),a
+  		ld a,PORT_A_RAMENA
+  		out (psg_wr_data),a
+short_delay:
+		ld b,0
+sdloop:
+		djnz sdloop
+		ret
+write_disp_data:
+  		push af
+  		ld a,psg_reg_port_b
+  		out (psg_wr_addr),a
+  		pop af
+  		out (psg_wr_data),A
+  		ld a,psg_reg_port_a
+  		out (psg_wr_addr),a
+  		ld a,PORT_A_DISP_CTL_RS|PORT_A_RAMENA
+  		out (psg_wr_data),a
+  		ld a,PORT_A_DISP_CTL_RS|PORT_A_DISP_CTL_E|PORT_A_RAMENA
+  		out (psg_wr_data),a
+  		ld a,PORT_A_DISP_CTL_RS|PORT_A_RAMENA
+  		out (psg_wr_data),a
+		jr short_delay
 
 RAM_START		EQU 	0x8000
 
@@ -1456,7 +1484,7 @@ bbcbasic:
 			ld hl,main_loop
 			push hl
 			CALL    TELL
-			DEFM	"Biscuit's Simple Z80 1.0\n\r"
+			DEFM	"Biscuit's Simple Z80 1.1\n\r"
 			DEFM	"\n\r"
 			DEFB    0
 
